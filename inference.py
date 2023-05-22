@@ -103,6 +103,24 @@ def hmm_normalizer(pi0, Ps, ll):
 
 
 def hmm_expected_states(pi0, Ps, ll, filter=False):
+    """
+    Calculates the posterior probabilities of HMM states given the observations, implicitly input via
+    the matrix of observation log-likelihoods.
+    :param pi0: shape (K,), vector of initial state probabilities.
+    :param Ps: shape (K, K): state transition matrix (time-homogeneous case)
+    :param ll: shape (T, K): matrix of log-likelihoods (i.e. log observation probabilities
+                             evaluated for the actual observations).
+    :param filter: False by default. If True the function calculates the so-called "filtered"
+                   posterior probabilities which only take into account observations until time t
+                   (as opposed to all observations until time T (with Python index T-1), which is what
+                   is calculated by default).
+    :return:
+    expected_states: this is an array of shape (T, K) with the t-th row giving the
+                     posterior probabilities of the different Markov states,
+                     conditioned on the sequence of observations.
+    normalizer: this is the model log-likelihood, i.e. it is the log-probability of the entire sequence
+                of observations (given the model parameters, which are implicit here).
+    """
     T, K = ll.shape
 
     alphas = np.zeros((T, K))
@@ -113,12 +131,12 @@ def hmm_expected_states(pi0, Ps, ll, filter=False):
     if not filter:
         backward_pass(Ps, ll, betas)
 
-    # Compute E[z_t] for t = 1, ..., T
+    # Compute P[x_t | n_{1:T}] for t = 1, ..., T (if filter = True, calculate P[x_t | n_{1:t}] instead).
     expected_states = alphas + betas
     expected_states -= logsumexp_scipy(expected_states, axis=1, keepdims=True)
     expected_states = np.exp(expected_states)
 
-    # expected_joints calculation taken out
+    # expected_joints calculation removed
 
     return expected_states, normalizer
 
