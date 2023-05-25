@@ -44,8 +44,6 @@ def forward_pass(pi0,
     T = log_likes.shape[0]  # number of time steps
     K = log_likes.shape[1]  # number of discrete states
 
-    # if Ps.ndim == 2:
-    #     Ps = Ps[None, :, :]
     assert Ps.shape[0] == T-1 or Ps.shape[0] == 1
     assert Ps.shape[1] == K
     assert Ps.shape[2] == K
@@ -107,7 +105,9 @@ def hmm_expected_states(pi0, Ps, ll, filter=False):
     Calculates the posterior probabilities of HMM states given the observations, implicitly input via
     the matrix of observation log-likelihoods.
     :param pi0: shape (K,), vector of initial state probabilities.
-    :param Ps: shape (K, K): state transition matrix (time-homogeneous case)
+    :param Ps: shape (K, K): state transition matrix (time-homogeneous case), or:
+               shape (T-1, K, K): temporal sequence
+
     :param ll: shape (T, K): matrix of log-likelihoods (i.e. log observation probabilities
                              evaluated for the actual observations).
     :param filter: False by default. If True the function calculates the so-called "filtered"
@@ -122,6 +122,10 @@ def hmm_expected_states(pi0, Ps, ll, filter=False):
                 of observations (given the model parameters, which are implicit here).
     """
     T, K = ll.shape
+
+    if Ps.ndim == 2:
+        Ps = Ps[None, :, :]
+    assert Ps.ndim == 3
 
     alphas = np.zeros((T, K))
     forward_pass(pi0, Ps, ll, alphas)
@@ -244,19 +248,24 @@ def poisson_logpdf(counts, lambdas, mask=None):
     (or at least compatible) leading dimensions.
     Parameters
     ----------
-    counts : array_like of shape (Ntrials, T)
-        array of integer counts for which to evaluate the log probability
+    counts : array_like of shape (T,) or (Ntrials, T),
+             array of integer counts for which to evaluate the log probability
     lambdas : array_like of shape (K,)
         The rates (mean counts) of the Poisson distribution(s)
     Returns
     -------
-    lps : array_like (Ntrials, T, K)
+    lps : array_like with shape (T, K), or (Ntrials, T, K) depending on
+          the shape of 'counts'.
         Log probabilities under the Poisson distribution(s).
     """
     assert counts.dtype in (int, np.int8, np.int16, np.int32, np.int64)
-    counts = counts[:,:,None]
-    # Compute log pdf
-    lambdas[lambdas == 0] = 1e-5
+    assert counts.ndim == 1 or counts.ndim == 2
+    if counts.ndim == 1:
+        counts = counts[:, None]
+    elif counts.ndim == 2:
+        counts = counts[:,:,None]
 
+    # Compute log pdf
+    lambdas[lambdas == 0] = 1e-8
     lls = -gammaln(counts + 1) - lambdas + counts * np.log(lambdas)
     return lls
