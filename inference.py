@@ -91,6 +91,10 @@ def hmm_normalizer(pi0, Ps, ll):
     T, K = ll.shape
     alphas = np.zeros((T, K))
 
+    if Ps.ndim == 2:
+        Ps = Ps[None, :, :]
+    assert Ps.ndim == 3
+
 #     # Make sure everything is C contiguous
 #     pi0 = to_c(pi0)
 #     Ps = to_c(Ps)
