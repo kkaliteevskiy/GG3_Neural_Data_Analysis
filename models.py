@@ -1,5 +1,8 @@
 import numpy as np
 import numpy.random as npr
+from scipy.ndimage import gaussian_filter1d as gaussian
+
+
 
 
 def lo_histogram(x, bins):
@@ -49,6 +52,7 @@ class StepModel():
         :param Rl: firing rate of the post-jump "down" state (rarely used)
         :param dt: real time duration of time steps in seconds (only used for converting rates to units of inverse time-step)
         """
+        self.modelel_type = 'Step'
         self.m = m
         self.r = r
         self.x0 = x0
@@ -147,6 +151,8 @@ class RampModel():
         self.sigma = sigma
         self.x0 = x0
 
+        self.model_type = 'Ramp'
+
         self.Rh = Rh
         if Rl is not None:
             self.Rl = Rl
@@ -228,3 +234,220 @@ class RampModel():
         else:
             return spikes, xs
 
+
+def get_transition_matrix(m, r):
+    p = r / (m+r)
+    print('p:',p, 'r:',r, 'm:',m)
+    transition_matrix = np.zeros([r+1,r+1])
+    for i in range(r):
+        transition_matrix[i][i] = 1 - p
+        transition_matrix[i][i+1] = p
+    transition_matrix[r][r] = 1
+    return transition_matrix
+
+class HMM_Step_Model():
+    def __init__(self, m, r, x0, Rh):
+
+        self.modelel_type = 'Step'
+        self.m = m
+        self.r = r
+        self.x0 = x0
+        self.p = r / (m + r)
+        self.Rh = Rh
+
+        self.P = get_transition_matrix()
+    
+    def get_transition_matrix(self):
+        p = self.r / (self.m+self.r)
+        # print('p:',self.p, 'r:',self.r, 'm:',self.m)
+        transition_matrix = np.zeros([self.r+1,self.r+1])
+        for i in range(self.r):
+            transition_matrix[i][i] = 1 - p
+            transition_matrix[i][i+1] = p
+        transition_matrix[self.r][self.r] = 1
+        return transition_matrix
+
+
+    def emit(self, rate):
+        """
+        emit spikes based on rates
+        :param rate: firing rate sequence, r_t, possibly in many trials. Shape: (Ntrials, T)
+        :return: spike train, n_t, as an array of shape (Ntrials, T) containing integer spike counts in different
+                    trials and time bins.
+        """
+        y = npr.poisson(rate * self.dt)
+        return y
+    
+    def simulate_states(self):
+        '''returns a sequence of states for a single trial of length T'''
+        x = [0]
+        p = self.p 
+        for t in range(1, self.T):
+            if x[t-1] == self.r:
+                x.append(self.r)
+            else:
+                x.append(x[t-1] + np.random.choice([0,1], p = [1-p, p]))
+        return x
+
+    def get_rate(self, x):
+        rate = np.ones(self.T) * self.x0 * self.Rh
+        rate[x == self.r] = self.Rh
+        return rate
+    
+    def simulate(self, Ntrials=1, T=100, get_rate=True):
+        """
+        :param Ntrials: (int) number of trials
+        :param T: (int) duration of each trial in number of time-steps.
+        :param get_rate: whether or not to return the rate time-series
+        :return:
+        spikes: shape = (Ntrial, T); spikes[j] gives the spike train, n_t, in trial j, as
+                an array of spike counts in each time-bin (= time step)
+        jumps:  shape = (Ntrials,) ; jumps[j] is the jump time (aka step time), tau, in trial j.
+        rates:  shape = (Ntrial, T); rates[j] is the rate time-series, r_t, in trial j (returned only if get_rate=True)
+        """
+        # set dt (time-step duration in seconds) such that trial duration is always 1 second, regardless of T.
+        dt = 1 / T
+        self.T = T
+        self.dt = dt
+
+        spikes, xs, rates = [], [], []
+
+   
+        for i in range(0, Ntrials):
+            x = self.simulate_states()
+            xs.append(x) 
+            rate = self.get_rate(np.array(x))
+            rates.append(rate)
+
+            spikes.append(self.emit(rate))
+
+        if get_rate:
+            return np.array(spikes), np.array(xs), np.array(rates)
+        else:
+            return np.array(spikes), np.array(xs)
+        
+
+class HMM_Ramp_Model():
+    def __init__(self, beta = 2, sigma = 2, x0 = 0.2, Rh = 75, K = 100, T = 100):
+        self.T = T
+        self.dt = 1/T
+        self.model_type = 'Ramp'
+        self.beta = beta
+        self.sigma = sigma
+        self.K = K
+        self.x0 = x0
+        self.Rh = Rh
+        self.P = self.get_transition_matrix()
+        self.set_initial_distribution()
+
+    def set_initial_distribution(self):
+        x = np.linspace(0,1,num = self.K)
+        arr = (x) / (self.sigma*np.sqrt(self.dt))
+        dist = self.normal_dist(arr)
+        dist_norm = dist / np.sum(dist)    
+        self.pi0 = dist_norm
+
+    def get_gaussian_kernel(self, K, mean, sigma):
+        x = np.arange(K)
+        kernel = np.exp(-0.5 * ((x - mean) / sigma) ** 2)
+        kernel[0] += 1 - np.sum(kernel)
+        return kernel
+
+    def simulate(self, Ntrials, get_rate = True):
+        """
+        :param Ntrials: (int) number of trials
+        :param T: (int) duration of each trial in number of time-steps.
+        :param get_rate: whether or not to return the rate time-series
+        :return:
+        spikes: shape = (Ntrial, T); spikes[j] gives the spike train, n_t, in trial j, as
+                an array of spike counts in each time-bin (= time step)
+        jumps:  shape = (Ntrials,) ; jumps[j] is the jump time (aka step time), tau, in trial j.
+        rates:  shape = (Ntrial, T); rates[j] is the rate time-series, r_t, in trial j (returned only if get_rate=True)
+        """
+
+        spikes, xs, rates = [], [], []
+   
+        for _ in range(0, Ntrials):
+            x = self.simulate_states()
+            xs.append(x) 
+            rate = self.get_rate(np.array(x))
+            rates.append(rate)
+            spikes.append(self.emit(rate))
+
+        if get_rate:
+            return np.array(spikes), np.array(xs), np.array(rates)
+        else:
+            return np.array(spikes), np.array(xs)
+        
+    def simulate_states(self):
+        '''returns a sequence of states for a single trial of length T'''
+        s = []
+        s.append(np.random.choice(np.arange(self.K), p=self.pi0))
+        for t in range(1, self.T):
+            s.append(np.random.choice(np.arange(self.K), p=self.P[s[t-1]]))
+        x = np.array(s) / (self.K - 1)
+        return x
+
+
+
+    def get_transition_matrix(self):
+        states = np.linspace(0,1,num = self.K)
+        trans = np.empty([self.K,self.K])
+        for i in range(self.K-1):
+            arr = (states - states[i] -  self.beta*self.dt) / (self.sigma*np.sqrt(self.dt))
+            dist = self.normal_dist(arr)
+            dist_norm = dist / np.sum(dist)
+            trans[i] = dist_norm
+        trans[self.K-1] = np.zeros(self.K)
+        trans[self.K-1][self.K-1] = 1
+        return trans
+    
+    def normal_dist(self, x, mean = 0, sd = 1):
+        prob_density = (np.pi*sd) * np.exp(-0.5*((x-mean)/sd)**2)
+        return prob_density
+
+
+    def emit(self, rate):
+        """
+        emit spikes based on rates
+        :param rate: firing rate sequence, r_t, possibly in many trials. Shape: (Ntrials, T)
+        :return: spike train, n_t, as an array of shape (Ntrials, T) containing integer spike counts in different
+                    trials and time bins.
+        """
+        y = npr.poisson(rate * self.dt)
+        return y
+    
+    def get_rate(self, xs):
+        rate = self.Rh * np.maximum(0, xs)
+        return rate
+
+    def simulate(self, Ntrials=1, T=100, get_rate=True):
+        """
+        :param Ntrials: (int) number of trials
+        :param T: (int) duration of each trial in number of time-steps.
+        :param get_rate: whether or not to return the rate time-series
+        :return:
+        spikes: shape = (Ntrial, T); spikes[j] gives the spike train, n_t, in trial j, as
+                an array of spike counts in each time-bin (= time step)
+        xs:     shape = (Ntrial, T); xs[j] is the latent variable time-series x_t in trial j
+        rates:  shape = (Ntrial, T); rates[j] is the rate time-series, r_t, in trial j (returned only if get_rate=True)
+        """
+        # set dt (time-step duration in seconds) such that trial duration is always 1 second, regardless of T.
+        dt = 1 / T
+        self.T = T
+        self.dt = dt
+
+        spikes, xs, rates = [], [], []
+
+        for i in range(Ntrials):
+            x = self.simulate_states()
+            xs.append(x)
+            rate = self.get_rate(np.array(x))
+            rates.append(rate)
+
+            spikes.append(self.emit(rate))
+
+        if get_rate:
+            return np.array(spikes), np.array(xs), np.array(rates)
+        else:
+            return np.array(spikes), np.array(xs)
