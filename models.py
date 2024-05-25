@@ -229,24 +229,19 @@ class RampModel():
 
         spikes = np.array([self.emit(rate) for rate in rates]) # shape = (Ntrial, T)
 
+        spikes = np.array(spikes)
+        xs = np.array(xs)
+        rates = np.array(rates)
+        
         if get_rate:
             return spikes, xs, rates
         else:
             return spikes, xs
 
 
-def get_transition_matrix(m, r):
-    p = r / (m+r)
-    print('p:',p, 'r:',r, 'm:',m)
-    transition_matrix = np.zeros([r+1,r+1])
-    for i in range(r):
-        transition_matrix[i][i] = 1 - p
-        transition_matrix[i][i+1] = p
-    transition_matrix[r][r] = 1
-    return transition_matrix
 
 class HMM_Step_Model():
-    def __init__(self, m, r, x0, Rh):
+    def __init__(self, m = 32, r = 6, x0 = 0.2, Rh = 75, T = 100):
 
         self.modelel_type = 'Step'
         self.m = m
@@ -254,16 +249,19 @@ class HMM_Step_Model():
         self.x0 = x0
         self.p = r / (m + r)
         self.Rh = Rh
+        self.T = T
+        self.dt = 1/T
+        self.P = self.get_transition_matrix()
+        self.pi0 = np.zeros(r+1)
+        self.pi0[0] = 1
+        self.lambdas = self.get_rate(np.arange(self.r+1)) 
 
-        self.P = get_transition_matrix()
     
     def get_transition_matrix(self):
-        p = self.r / (self.m+self.r)
-        # print('p:',self.p, 'r:',self.r, 'm:',self.m)
         transition_matrix = np.zeros([self.r+1,self.r+1])
         for i in range(self.r):
-            transition_matrix[i][i] = 1 - p
-            transition_matrix[i][i+1] = p
+            transition_matrix[i][i] = 1 - self.p
+            transition_matrix[i][i+1] = self.p
         transition_matrix[self.r][self.r] = 1
         return transition_matrix
 
@@ -290,8 +288,8 @@ class HMM_Step_Model():
         return x
 
     def get_rate(self, x):
-        rate = np.ones(self.T) * self.x0 * self.Rh
-        rate[x == self.r] = self.Rh
+        rate = np.ones(len(x)) * self.x0 * self.Rh
+        rate[x == self.r+1] = self.Rh
         return rate
     
     def simulate(self, Ntrials=1, T=100, get_rate=True):
@@ -306,9 +304,6 @@ class HMM_Step_Model():
         rates:  shape = (Ntrial, T); rates[j] is the rate time-series, r_t, in trial j (returned only if get_rate=True)
         """
         # set dt (time-step duration in seconds) such that trial duration is always 1 second, regardless of T.
-        dt = 1 / T
-        self.T = T
-        self.dt = dt
 
         spikes, xs, rates = [], [], []
 
@@ -320,11 +315,22 @@ class HMM_Step_Model():
             rates.append(rate)
 
             spikes.append(self.emit(rate))
+        
+        spikes = np.array(spikes)
+        xs = np.array(xs)
+        rates = np.array(rates)
 
+        if spikes.shape[0] == 1:
+            spikes = np.squeeze(spikes, axis=0)
+        if xs.shape[0] == 1:
+            xs = np.squeeze(xs, axis=0)
+        if rates.shape[0] == 1:
+            rates = np.squeeze(rates, axis=0)
+        
         if get_rate:
-            return np.array(spikes), np.array(xs), np.array(rates)
+            return spikes, xs, rates
         else:
-            return np.array(spikes), np.array(xs)
+            return spikes, xs
         
 
 class HMM_Ramp_Model():
@@ -338,7 +344,9 @@ class HMM_Ramp_Model():
         self.x0 = x0
         self.Rh = Rh
         self.P = self.get_transition_matrix()
+        self.pi0 = None
         self.set_initial_distribution()
+        self.lambdas = self.get_rate(np.linspace(0,1,num = self.K)) * self.dt
 
     def set_initial_distribution(self):
         x = np.linspace(0,1,num = self.K)
@@ -353,32 +361,45 @@ class HMM_Ramp_Model():
         kernel[0] += 1 - np.sum(kernel)
         return kernel
 
-    def simulate(self, Ntrials, get_rate = True):
-        """
-        :param Ntrials: (int) number of trials
-        :param T: (int) duration of each trial in number of time-steps.
-        :param get_rate: whether or not to return the rate time-series
-        :return:
-        spikes: shape = (Ntrial, T); spikes[j] gives the spike train, n_t, in trial j, as
-                an array of spike counts in each time-bin (= time step)
-        jumps:  shape = (Ntrials,) ; jumps[j] is the jump time (aka step time), tau, in trial j.
-        rates:  shape = (Ntrial, T); rates[j] is the rate time-series, r_t, in trial j (returned only if get_rate=True)
-        """
+    # def simulate(self, Ntrials, get_rate = True):
+    #     """
+    #     :param Ntrials: (int) number of trials
+    #     :param T: (int) duration of each trial in number of time-steps.
+    #     :param get_rate: whether or not to return the rate time-series
+    #     :return:
+    #     spikes: shape = (Ntrial, T); spikes[j] gives the spike train, n_t, in trial j, as
+    #             an array of spike counts in each time-bin (= time step)
+    #     jumps:  shape = (Ntrials,) ; jumps[j] is the jump time (aka step time), tau, in trial j.
+    #     rates:  shape = (Ntrial, T); rates[j] is the rate time-series, r_t, in trial j (returned only if get_rate=True)
+    #     """
 
-        spikes, xs, rates = [], [], []
+    #     spikes, xs, rates = [], [], []
    
-        for _ in range(0, Ntrials):
-            x = self.simulate_states()
-            xs.append(x) 
-            rate = self.get_rate(np.array(x))
-            rates.append(rate)
-            spikes.append(self.emit(rate))
-
-        if get_rate:
-            return np.array(spikes), np.array(xs), np.array(rates)
-        else:
-            return np.array(spikes), np.array(xs)
+    #     for _ in range(0, Ntrials):
+    #         x = self.simulate_states()
+    #         xs.append(x) 
+    #         rate = self.get_rate(np.array(x))
+    #         rates.append(rate)
+    #         spikes.append(self.emit(rate))
         
+
+    #     spikes = np.array(spikes)
+    #     xs = np.array(xs)
+    #     rates = np.array(rates)
+
+    #     print('hereasdfasdfa')
+    #     if spikes.shape[0] == 1:
+    #         spikes = np.squeeze(spikes, axis=0)
+    #     if xs.shape[0] == 1:
+    #         xs = np.squeeze(xs, axis=0)
+    #     if rates.shape[0] == 1:
+    #         rates = np.squeeze(rates, axis=0)
+
+    #     if get_rate:
+    #         return spikes, xs, rates
+    #     else:
+    #         return spikes, xs
+                                                      
     def simulate_states(self):
         '''returns a sequence of states for a single trial of length T'''
         s = []
@@ -439,13 +460,23 @@ class HMM_Ramp_Model():
 
         spikes, xs, rates = [], [], []
 
-        for i in range(Ntrials):
+        for _ in range(Ntrials):
             x = self.simulate_states()
             xs.append(x)
             rate = self.get_rate(np.array(x))
             rates.append(rate)
 
             spikes.append(self.emit(rate))
+        
+        spikes = np.array(spikes)
+        xs = np.array(xs)
+        rates = np.array(rates)
+        if spikes.shape[0] == 1:
+            spikes = np.squeeze(spikes, axis=0)
+        if xs.shape[0] == 1:
+            xs = np.squeeze(xs, axis=0)
+        if rates.shape[0] == 1:
+            rates = np.squeeze(rates, axis=0)
 
         if get_rate:
             return np.array(spikes), np.array(xs), np.array(rates)
