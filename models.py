@@ -254,7 +254,7 @@ class HMM_Step_Model():
         self.P = self.get_transition_matrix()
         self.pi0 = np.zeros(r+1)
         self.pi0[0] = 1
-        self.lambdas = self.get_rate(np.arange(self.r+1)) 
+        self.lambdas = self.get_rate(np.arange(self.r+1)) * self.dt
 
     
     def get_transition_matrix(self):
@@ -289,7 +289,7 @@ class HMM_Step_Model():
 
     def get_rate(self, x):
         rate = np.ones(len(x)) * self.x0 * self.Rh
-        rate[x == self.r+1] = self.Rh
+        rate[x == self.r] = self.Rh
         return rate
     
     def simulate(self, Ntrials=1, T=100, get_rate=True):
@@ -334,6 +334,7 @@ class HMM_Step_Model():
         
 
 class HMM_Ramp_Model():
+
     def __init__(self, beta = 2, sigma = 2, x0 = 0.2, Rh = 75, K = 100, T = 100):
         self.T = T
         self.dt = 1/T
@@ -361,44 +362,6 @@ class HMM_Ramp_Model():
         kernel[0] += 1 - np.sum(kernel)
         return kernel
 
-    # def simulate(self, Ntrials, get_rate = True):
-    #     """
-    #     :param Ntrials: (int) number of trials
-    #     :param T: (int) duration of each trial in number of time-steps.
-    #     :param get_rate: whether or not to return the rate time-series
-    #     :return:
-    #     spikes: shape = (Ntrial, T); spikes[j] gives the spike train, n_t, in trial j, as
-    #             an array of spike counts in each time-bin (= time step)
-    #     jumps:  shape = (Ntrials,) ; jumps[j] is the jump time (aka step time), tau, in trial j.
-    #     rates:  shape = (Ntrial, T); rates[j] is the rate time-series, r_t, in trial j (returned only if get_rate=True)
-    #     """
-
-    #     spikes, xs, rates = [], [], []
-   
-    #     for _ in range(0, Ntrials):
-    #         x = self.simulate_states()
-    #         xs.append(x) 
-    #         rate = self.get_rate(np.array(x))
-    #         rates.append(rate)
-    #         spikes.append(self.emit(rate))
-        
-
-    #     spikes = np.array(spikes)
-    #     xs = np.array(xs)
-    #     rates = np.array(rates)
-
-    #     print('hereasdfasdfa')
-    #     if spikes.shape[0] == 1:
-    #         spikes = np.squeeze(spikes, axis=0)
-    #     if xs.shape[0] == 1:
-    #         xs = np.squeeze(xs, axis=0)
-    #     if rates.shape[0] == 1:
-    #         rates = np.squeeze(rates, axis=0)
-
-    #     if get_rate:
-    #         return spikes, xs, rates
-    #     else:
-    #         return spikes, xs
                                                       
     def simulate_states(self):
         '''returns a sequence of states for a single trial of length T'''
@@ -408,8 +371,6 @@ class HMM_Ramp_Model():
             s.append(np.random.choice(np.arange(self.K), p=self.P[s[t-1]]))
         x = np.array(s) / (self.K - 1)
         return x
-
-
 
     def get_transition_matrix(self):
         states = np.linspace(0,1,num = self.K)
