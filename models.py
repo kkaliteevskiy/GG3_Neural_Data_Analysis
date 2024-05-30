@@ -1,7 +1,7 @@
 import numpy as np
 import numpy.random as npr
 from scipy.ndimage import gaussian_filter1d as gaussian
-
+from scipy.stats import norm
 
 
 
@@ -350,18 +350,8 @@ class HMM_Ramp_Model():
         self.lambdas = self.get_rate(np.linspace(0,1,num = self.K)) * self.dt
 
     def set_initial_distribution(self):
-        x = np.linspace(0,1,num = self.K)
-        arr = (x) / (self.sigma*np.sqrt(self.dt))
-        dist = self.normal_dist(arr)
-        dist_norm = dist / np.sum(dist)    
-        self.pi0 = dist_norm
-
-    def get_gaussian_kernel(self, K, mean, sigma):
-        x = np.arange(K)
-        kernel = np.exp(-0.5 * ((x - mean) / sigma) ** 2)
-        kernel[0] += 1 - np.sum(kernel)
-        return kernel
-
+        pi0 = self.normal_dist(mean = self.x0, sd = self.sigma * np.sqrt(self.dt))
+        self.pi0 = pi0
                                                       
     def simulate_states(self):
         '''returns a sequence of states for a single trial of length T'''
@@ -373,20 +363,21 @@ class HMM_Ramp_Model():
         return x
 
     def get_transition_matrix(self):
-        states = np.linspace(0,1,num = self.K)
         trans = np.empty([self.K,self.K])
-        for i in range(self.K-1):
-            arr = (states - states[i] -  self.beta*self.dt) / (self.sigma*np.sqrt(self.dt))
-            dist = self.normal_dist(arr)
-            dist_norm = dist / np.sum(dist)
-            trans[i] = dist_norm
+        arr = np.linspace(0,1,num = self.K)
+        for i, x in enumerate(arr):
+            trans[i] = self.normal_dist(mean = x + self.beta * self.dt, sd = self.sigma * np.sqrt(self.dt))
         trans[self.K-1] = np.zeros(self.K)
         trans[self.K-1][self.K-1] = 1
         return trans
     
-    def normal_dist(self, x, mean = 0, sd = 1):
-        prob_density = (np.pi*sd) * np.exp(-0.5*((x-mean)/sd)**2)
-        return prob_density
+    def normal_dist(self, mean = 0, sd = 1):
+        x = np.linspace(0, 1, self.K)
+        step = (x[1] - x[0]) * np.ones(self.K)
+        kernel = norm.cdf(x + step/2, loc=mean, scale=sd) - norm.cdf(x-step/2, loc=mean, scale=sd)
+        kernel = kernel / np.sum(kernel)
+        # prob_density = (np.pi*sd) * np.exp(-0.5*((x-mean)/sd)**2)
+        return kernel
 
 
     def emit(self, rate):
