@@ -102,7 +102,7 @@ class StepModel():
         spikes: shape = (Ntrial, T); spikes[j] gives the spike train, n_t, in trial j, as
                 an array of spike counts in each time-bin (= time step)
         jumps:  shape = (Ntrials,) ; jumps[j] is the jump time (aka step time), tau, in trial j.
-        rates:  shape = (Ntrial, T); rates[j] is the rate time-series, r_t, in trial j (returned only if get_rate=True)
+    rates:  shape = (Ntrial, T); rates[j] is the rate time-series, r_t, in trial j (returned only if get_rate=True)
         """
         # set dt (time-step duration in seconds) such that trial duration is always 1 second, regardless of T.
         dt = 1 / T
@@ -232,18 +232,30 @@ class RampModel():
         spikes = np.array(spikes)
         xs = np.array(xs)
         rates = np.array(rates)
+
+        transition_time = self.get_transition_time(xs)
         
         if get_rate:
-            return spikes, xs, rates
+            return spikes, xs, rates#, transition_time
         else:
             return spikes, xs
+        
+    # def get_transition_time(self, xs):
+    #     true_transitions = []
+
+    # for x in xs_step:
+    #     for i in range(len(x)):
+    #         if x[i] == shmm.r:
+    #             true_transitions.append(i)
+    #             break
 
 
 
 class HMM_Step_Model():
-    def __init__(self, m = 32, r = 6, x0 = 0.2, Rh = 75, T = 100):
+    def __init__(self, m = 32, r = 6, x0 = 0.2, Rh = 75, T = 100, isi_gamma_shape=None):
 
         self.modelel_type = 'Step'
+        self.isi_gamma_shape = isi_gamma_shape
         self.m = m
         self.r = r
         self.x0 = x0
@@ -252,17 +264,17 @@ class HMM_Step_Model():
         self.T = T
         self.dt = 1/T
         self.P = self.get_transition_matrix()
-        self.pi0 = np.zeros(r+1)
+        self.pi0 = np.zeros(r)
         self.pi0[0] = 1
-        self.lambdas = self.get_rate(np.arange(self.r+1)) * self.dt
+        self.lambdas = self.get_rate(np.arange(self.r)) * self.dt
 
     
     def get_transition_matrix(self):
-        transition_matrix = np.zeros([self.r+1,self.r+1])
-        for i in range(self.r):
+        transition_matrix = np.zeros([self.r,self.r])
+        for i in range(self.r - 1):
             transition_matrix[i][i] = 1 - self.p
             transition_matrix[i][i+1] = self.p
-        transition_matrix[self.r][self.r] = 1
+        transition_matrix[self.r-1][self.r-1] = 1
         return transition_matrix
 
 
@@ -273,23 +285,27 @@ class HMM_Step_Model():
         :return: spike train, n_t, as an array of shape (Ntrials, T) containing integer spike counts in different
                     trials and time bins.
         """
-        y = npr.poisson(rate * self.dt)
+        if self.isi_gamma_shape is None:
+            # poisson spike emissions
+            y = npr.poisson(rate * self.dt)
+        else:
+            y = gamma_isi_point_process(rate * self.dt, self.isi_gamma_shape)
         return y
     
     def simulate_states(self):
         '''returns a sequence of states for a single trial of length T'''
         x = [0]
         p = self.p 
-        for t in range(1, self.T):
-            if x[t-1] == self.r:
-                x.append(self.r)
+        for t in range(1, self.T + self.r - 1):
+            if x[t-1] == self.r-1:
+                x.append(self.r-1)
             else:
                 x.append(x[t-1] + np.random.choice([0,1], p = [1-p, p]))
-        return x
+        return x[-self.T:]
 
     def get_rate(self, x):
         rate = np.ones(len(x)) * self.x0 * self.Rh
-        rate[x == self.r] = self.Rh
+        rate[x == (self.r-1)] = self.Rh
         return rate
     
     def simulate(self, Ntrials=1, T=100, get_rate=True):
@@ -335,9 +351,10 @@ class HMM_Step_Model():
 
 class HMM_Ramp_Model():
 
-    def __init__(self, beta = 2, sigma = 2, x0 = 0.2, Rh = 75, K = 100, T = 100):
+    def __init__(self, beta = 2, sigma = 2, x0 = 0.2, Rh = 75, K = 100, T = 100, isi_gamma_shape = None):
         self.T = T
         self.dt = 1/T
+        self.isi_gamma_shape = isi_gamma_shape
         self.model_type = 'Ramp'
         self.beta = beta
         self.sigma = sigma
@@ -387,7 +404,11 @@ class HMM_Ramp_Model():
         :return: spike train, n_t, as an array of shape (Ntrials, T) containing integer spike counts in different
                     trials and time bins.
         """
-        y = npr.poisson(rate * self.dt)
+        if self.isi_gamma_shape is None:
+            # poisson spike emissions
+            y = npr.poisson(rate * self.dt)
+        else:
+            y = gamma_isi_point_process(rate * self.dt, self.isi_gamma_shape)
         return y
     
     def get_rate(self, xs):
